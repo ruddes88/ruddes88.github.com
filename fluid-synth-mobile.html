@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fluid Drag-to-Play Synth</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        * {
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: none;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: black;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+
+        #start-button {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px 20px;
+            background-color: #0000FF;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            z-index: 1000;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #container {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            right: 2px;
+            bottom: 2px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            opacity: 0.1;
+            transition: opacity 0.3s ease;
+            touch-action: none;
+        }
+
+        #container.started {
+            opacity: 1;
+        }
+
+        .key-group {
+            position: relative;
+            width: 100%;
+            flex: 1;
+        }
+
+        .white-key {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, white 20%, #0000FF 80%);
+            cursor: pointer;
+            user-select: none;
+            border-radius: 9999px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .black-key {
+            position: absolute;
+            top: -37.5%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 66.67%;
+            height: 75%;
+            background: linear-gradient(90deg, #0000FF 20%, white 80%);
+            cursor: pointer;
+            user-select: none;
+            z-index: 1;
+            border-radius: 9999px;
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <button id="start-button">Start Audio</button>
+    <div id="container"></div>
+
+    <script>
+        const synth = new Tone.MonoSynth({
+            oscillator: { type: "triangle8" },
+            envelope: {
+                attack: 0.02,
+                decay: 0.1,
+                sustain: 0.3,
+                release: 1
+            }
+        }).toDestination();
+
+        const keyStructure = [
+            { white: { note: 'B3' }, black: null },
+            { white: { note: 'A3' }, black: { note: 'A#3' } },
+            { white: { note: 'G3' }, black: { note: 'G#3' } },
+            { white: { note: 'F3' }, black: { note: 'F#3' } },
+            { white: { note: 'E3' }, black: null },
+            { white: { note: 'D3' }, black: { note: 'D#3' } },
+            { white: { note: 'C3' }, black: { note: 'C#3' } }
+        ];
+
+        let isStarted = false;
+        let isMouseDown = false;
+        let activeKey = null;
+        let touchId = null;
+
+        const container = document.getElementById('container');
+        const startButton = document.getElementById('start-button');
+
+        function getEventPoint(e) {
+            if (e.touches) {
+                const touch = Array.from(e.touches).find(t => t.identifier === touchId);
+                return touch || e.touches[0];
+            }
+            return e;
+        }
+
+        function getOctaveBlend(e, keyElement) {
+            const rect = keyElement.getBoundingClientRect();
+            const point = getEventPoint(e);
+            const x = point.clientX - rect.left;
+            return Math.max(0, Math.min(1, x / rect.width));
+        }
+
+        function playNote(e, keyElement, note) {
+            if (!isStarted || (!isMouseDown && !touchId)) return;
+            
+            if (activeKey && activeKey.element === keyElement) {
+                const blend = getOctaveBlend(e, keyElement);
+                const baseFreq = Tone.Frequency(note).toFrequency();
+                const targetFreq = baseFreq * 2;
+                const newFreq = baseFreq + (targetFreq - baseFreq) * blend;
+                synth.frequency.rampTo(newFreq, 0.01);
+            } else {
+                if (activeKey) {
+                    synth.triggerRelease();
+                }
+                
+                activeKey = { note, element: keyElement };
+                const blend = getOctaveBlend(e, keyElement);
+                const baseFreq = Tone.Frequency(note).toFrequency();
+                const targetFreq = baseFreq * 2;
+                const startFreq = baseFreq + (targetFreq - baseFreq) * blend;
+                synth.triggerAttack(startFreq);
+            }
+        }
+
+        function attachKeyEvents(keyElement, note) {
+            // Mouse events
+            keyElement.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                if (touchId === null) {
+                    isMouseDown = true;
+                    playNote(e, keyElement, note);
+                }
+            });
+
+            keyElement.addEventListener('mousemove', (e) => {
+                e.preventDefault();
+                playNote(e, keyElement, note);
+            });
+
+            keyElement.addEventListener('mouseleave', (e) => {
+                e.preventDefault();
+                if (activeKey && activeKey.element === keyElement) {
+                    synth.triggerRelease();
+                    activeKey = null;
+                }
+            });
+
+            // Touch events
+            keyElement.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (!touchId) {
+                    touchId = e.touches[0].identifier;
+                    playNote(e, keyElement, note);
+                }
+            });
+
+            keyElement.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                playNote(e, keyElement, note);
+            });
+
+            keyElement.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (activeKey && activeKey.element === keyElement) {
+                    synth.triggerRelease();
+                    activeKey = null;
+                    touchId = null;
+                }
+            });
+
+            keyElement.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                if (activeKey && activeKey.element === keyElement) {
+                    synth.triggerRelease();
+                    activeKey = null;
+                    touchId = null;
+                }
+            });
+        }
+
+        startButton.addEventListener('click', async () => {
+            await Tone.start();
+            isStarted = true;
+            startButton.style.display = 'none';
+            container.classList.add('started');
+        });
+
+        startButton.addEventListener('touchend', async (e) => {
+            e.preventDefault();
+            await Tone.start();
+            isStarted = true;
+            startButton.style.display = 'none';
+            container.classList.add('started');
+        });
+
+        keyStructure.forEach((group) => {
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'key-group';
+
+            const whiteKey = document.createElement('div');
+            whiteKey.className = 'white-key';
+            attachKeyEvents(whiteKey, group.white.note);
+            groupDiv.appendChild(whiteKey);
+
+            if (group.black) {
+                const blackKey = document.createElement('div');
+                blackKey.className = 'black-key';
+                attachKeyEvents(blackKey, group.black.note);
+                groupDiv.appendChild(blackKey);
+            }
+
+            container.appendChild(groupDiv);
+        });
+
+        // Global event handlers
+        document.addEventListener('mouseup', () => {
+            if (touchId === null) {
+                isMouseDown = false;
+                if (activeKey) {
+                    synth.triggerRelease();
+                    activeKey = null;
+                }
+            }
+        });
+
+        // Prevent default behaviors
+        document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+        document.addEventListener('selectstart', (e) => e.preventDefault());
+        document.addEventListener('gesturestart', (e) => e.preventDefault());
+        document.addEventListener('gesturechange', (e) => e.preventDefault());
+        document.addEventListener('gestureend', (e) => e.preventDefault());
+    </script>
+</body>
+</html>
